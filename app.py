@@ -1,8 +1,9 @@
 # app.py
 import streamlit as st
 import os
+import logging
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader # Use PyPDFLoader for consistency
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.vectorstores.neo4j_vector import Neo4jVector
@@ -11,23 +12,27 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_groq import ChatGroq
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.messages import AIMessage, HumanMessage
-import logging
 
-
+# --- Logging Setup ---
+# Configure logging for better debugging if needed during development/deployment
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- Page Configuration ---
 st.set_page_config(page_title="Project SHADOW", layout="wide", initial_sidebar_state="expanded")
 st.title(" R.A.W. Intelligence Retrieval System (Project SHADOW) ")
 st.caption("Classified Level 7 - For Authorized Personnel Only")
 
+# --- Constants ---
+# Ensure this path points to the PDF file within your deployment environment
+SECRET_MANUAL_PDF = "SECRET INFO MANUAL.pdf" # Assumes it's in the same directory as app.py
 
-SECRET_MANUAL_PDF = "SECRET INFO MANUAL.pdf" 
+# Neo4j configuration details (must match your populated database)
+NEO4J_NODE_LABEL = "Document"                 # Label used in Neo4j for text chunks
+NEO4J_TEXT_PROPERTY = "text"                  # Property name for text in Neo4j nodes
+NEO4J_EMBEDDING_PROPERTY = "embedding"        # Property name for embedding in Neo4j nodes
 
-NEO4J_NODE_LABEL = "Document"               
-NEO4J_TEXT_PROPERTY = "text"                  
-NEO4J_EMBEDDING_PROPERTY = "embedding"          
-
+# Agent level mapping for the dropdown
 AGENT_LEVEL_MAP = {
     "Level 1 - Novice Operative (Shadow Footprint)": 1,
     "Level 2 - Tactical Specialist (Iron Claw)": 2,
@@ -36,7 +41,7 @@ AGENT_LEVEL_MAP = {
     "Level 5 - Intelligence Overlord (Silent Whisper)": 5,
 }
 
-
+# --- Resource Initialization Functions with Caching ---
 
 @st.cache_resource
 def load_embeddings():
@@ -48,7 +53,8 @@ def load_embeddings():
             st.error("Google API Key not found in secrets.toml. Cannot load embeddings.")
             logger.error("GOOGLE_API_KEY not found in secrets.")
             return None
-        os.environ['GOOGLE_API_KEY'] = google_api_key 
+        # Set environment variable if needed by the underlying library
+        os.environ['GOOGLE_API_KEY'] = google_api_key
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         logger.info("Embeddings model loaded successfully.")
         return embeddings
@@ -57,10 +63,9 @@ def load_embeddings():
         logger.exception("Error loading Google embeddings.")
         return None
 
-
 @st.cache_resource
 def build_faiss_vector_store_from_pdf(_embeddings):
-    """Loads PDF, splits, creates embeddings, and builds FAISS index in memory."""
+    """Loads the Secret Manual PDF, splits it, creates embeddings, and builds the FAISS index in memory."""
     logger.info(f"Attempting to build FAISS index from PDF: {SECRET_MANUAL_PDF}")
     if _embeddings is None:
         st.error("Embeddings model not loaded, cannot build FAISS index.")
@@ -70,28 +75,28 @@ def build_faiss_vector_store_from_pdf(_embeddings):
     if not os.path.exists(SECRET_MANUAL_PDF):
         st.error(f"Secret Manual PDF not found at: {SECRET_MANUAL_PDF}")
         logger.error(f"Secret Manual PDF not found at: {SECRET_MANUAL_PDF}")
-        st.info("Please ensure the PDF file is in the correct location.")
+        st.info("Ensure the PDF file is placed in the same directory as the app script.")
         return None
 
     try:
-        st.info(f"Loading Secret Information Manual PDF: {SECRET_MANUAL_PDF}...")
-        loader = PyPDFLoader(SECRET_MANUAL_PDF) # Using PyPDFLoader consistently
-        docs = loader.load()
-        if not docs:
-             st.error(f"No content loaded from {SECRET_MANUAL_PDF}.")
-             logger.error(f"No content loaded from {SECRET_MANUAL_PDF}.")
-             return None
+        # Display progress to the user for potentially slow operations
+        with st.spinner(f"Loading and processing {SECRET_MANUAL_PDF}..."):
+            loader = PyPDFLoader(SECRET_MANUAL_PDF)
+            docs = loader.load()
+            if not docs:
+                 st.error(f"No content loaded from {SECRET_MANUAL_PDF}.")
+                 logger.error(f"No content loaded from {SECRET_MANUAL_PDF}.")
+                 return None
 
-        st.info("Splitting Secret Manual document...")
-        splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=100)
-        split_docs = splitter.split_documents(docs)
-        st.success(f"Secret Manual loaded and split into {len(split_docs)} chunks.")
+            splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=100)
+            split_docs = splitter.split_documents(docs)
+            logger.info(f"Secret Manual split into {len(split_docs)} chunks.")
 
-        st.info("Building FAISS index from chunks (this may take a moment)...")
-        db = FAISS.from_documents(split_docs, _embeddings)
-        logger.info("FAISS index built successfully in memory.")
-        st.success("Secret Manual FAISS Index built.")
-        return db
+        with st.spinner("Building FAISS index for Secret Manual..."):
+            db = FAISS.from_documents(split_docs, _embeddings)
+            logger.info("FAISS index built successfully in memory.")
+            st.success("Secret Manual FAISS Index Initialized.")
+            return db
     except Exception as e:
         st.error(f"Error building FAISS vector store from PDF: {e}")
         logger.exception("Error building FAISS vector store from PDF.")
@@ -100,13 +105,14 @@ def build_faiss_vector_store_from_pdf(_embeddings):
 
 @st.cache_resource
 def setup_neo4j_vector_interface(_embeddings):
-    """Sets up the Neo4jVector interface to the existing graph index using secrets."""
-    logger.info("Attempting to connect Neo4jVector interface...")
+    """Sets up the Neo4jVector interface to the existing Response Framework index using secrets."""
+    logger.info("Attempting to connect Neo4jVector interface using secrets...")
     if _embeddings is None:
         st.error("Embeddings model not loaded, cannot connect Neo4jVector.")
         logger.error("Embeddings model not available for Neo4jVector connection.")
         return None
     try:
+        # Retrieve credentials securely using st.secrets
         uri = st.secrets.get("NEO4J_URI")
         username = st.secrets.get("NEO4J_USERNAME")
         password = st.secrets.get("NEO4J_PASSWORD")
@@ -116,29 +122,31 @@ def setup_neo4j_vector_interface(_embeddings):
             logger.error("Missing Neo4j credentials in secrets.")
             return None
 
+        # Connect to the existing index in the Neo4j database
         neo4j_vector = Neo4jVector.from_existing_graph(
             embedding=_embeddings,
             url=uri,
             username=username,
             password=password,
-            node_label=NEO4J_NODE_LABEL,
-            text_node_properties=[NEO4J_TEXT_PROPERTY],
-            embedding_node_property=NEO4J_EMBEDDING_PROPERTY,
+            node_label=NEO4J_NODE_LABEL,                 # Must match label in Neo4j
+            text_node_properties=[NEO4J_TEXT_PROPERTY],  # Must match text property in Neo4j
+            embedding_node_property=NEO4J_EMBEDDING_PROPERTY, # Must match embedding property in Neo4j
         )
-        logger.info("Neo4jVector interface connected successfully.")
-        st.success("Response Framework Neo4j Interface connected.")
+        logger.info("Neo4jVector interface connected successfully (using secrets).")
+        st.success("Response Framework Neo4j Interface Connected.")
         return neo4j_vector
     except Exception as e:
+        # Provide informative error message if connection fails
         st.error(f"Error setting up Neo4jVector interface: {e}")
         logger.exception("Error connecting Neo4jVector interface.")
-        st.warning(f"Ensure Neo4j is running and accessible at '{st.secrets.get('NEO4J_URI', 'URI not found')}' "
-                   f"with nodes labelled '{NEO4J_NODE_LABEL}' having properties '{NEO4J_TEXT_PROPERTY}' "
-                   f"and '{NEO4J_EMBEDDING_PROPERTY}', and the vector index exists.")
+        st.warning(f"Ensure Neo4j is running and accessible at the URI specified in secrets "
+                   f"and that it contains '{NEO4J_NODE_LABEL}' nodes with properties '{NEO4J_TEXT_PROPERTY}', "
+                   f"'{NEO4J_EMBEDDING_PROPERTY}', and an existing vector index.")
         return None
 
 @st.cache_resource
 def get_tools(_secret_manual_retriever_obj, _framework_retriever_obj):
-    """Creates retriever tools from initialized retriever objects."""
+    """Creates the agent's retriever tools."""
     logger.info("Attempting to create agent tools...")
     if not _secret_manual_retriever_obj or not _framework_retriever_obj:
         st.error("One or both vector stores failed to initialize. Cannot create tools.")
@@ -146,10 +154,11 @@ def get_tools(_secret_manual_retriever_obj, _framework_retriever_obj):
         return []
 
     try:
-        # Use the actual VectorStore objects directly to get retrievers
+        # Create retrievers from the vector store objects
         secret_retriever = _secret_manual_retriever_obj.as_retriever()
         framework_retriever = _framework_retriever_obj.as_retriever()
 
+        # Define the tools with clear names and descriptions
         secret_tool = create_retriever_tool(
             retriever=secret_retriever,
             name="search_raw_agent_secret_manual",
@@ -161,7 +170,7 @@ def get_tools(_secret_manual_retriever_obj, _framework_retriever_obj):
             description="Use this tool FIRST to understand response rules, greetings, styles, access control based on agent level (1-5) and query. Contains rules (1-100) for handling specific queries/keywords ('Omega Echo', 'disguise strategies', 'Level-5 data'). Use for 'How should I respond?', 'Greeting for?', 'Rule for?', 'Response style for?', agent classifications."
         )
         logger.info("Agent tools created successfully.")
-        # IMPORTANT: Framework tool first, as per prompt instructions
+        # IMPORTANT: Ensure framework tool is first in the list
         return [framework_tool, secret_tool]
     except Exception as e:
         st.error(f"Error creating retriever tools: {e}")
@@ -178,6 +187,7 @@ def get_llm():
             st.error("Groq API Key not found in secrets.toml. Cannot initialize LLM.")
             logger.error("GROQ_API_KEY not found in secrets.")
             return None
+        # Initialize Groq LLM with specified model and low temperature for consistency
         llm = ChatGroq(model='gemma2-9b-it', temperature=0.2, groq_api_key=groq_api_key)
         logger.info("LLM initialized successfully.")
         return llm
@@ -188,9 +198,9 @@ def get_llm():
 
 @st.cache_resource
 def get_agent_prompt():
-    """Creates the ChatPromptTemplate for the agent."""
+    """Creates the detailed ChatPromptTemplate for the agent."""
     logger.info("Creating agent prompt template.")
-    # Using the final refined prompt from previous steps
+    # Final refined prompt with explicit steps and strict handling
     return ChatPromptTemplate.from_messages([
         (
             "system",
@@ -234,7 +244,7 @@ def get_agent_prompt():
 
 @st.cache_resource
 def get_agent_executor(_llm, _tools, _prompt):
-    """Creates the agent and executor."""
+    """Creates the agent and executor, handling potential initialization errors."""
     logger.info("Attempting to create agent executor...")
     if not _llm or not _tools or not _prompt:
         st.error("LLM, Tools, or Prompt not available. Cannot create agent executor.")
@@ -242,45 +252,60 @@ def get_agent_executor(_llm, _tools, _prompt):
         return None
 
     try:
+        # Using create_openai_tools_agent, ensure LLM supports compatible tool/function calling
         agent = create_openai_tools_agent(llm=_llm, tools=_tools, prompt=_prompt)
         agent_executor = AgentExecutor(
             agent=agent,
             tools=_tools,
-            verbose=True, # Set True for debugging in console/logs
-            handle_parsing_errors=True,
-            max_iterations=10
+            verbose=True, # Logs agent steps to console/logs (useful for debugging)
+            handle_parsing_errors=True, # Provides robustness if LLM output isn't perfectly formatted
+            max_iterations=10 # Limit iterations to prevent runaway agents
             )
         logger.info("Agent executor created successfully.")
-        st.success("Agent Executor Initialized.")
+        st.success("Agent Executor Initialized and Ready.") # User feedback
         return agent_executor
     except Exception as e:
-        st.error(f"Error creating agent executor: {e}")
-        logger.exception("Error creating agent executor.")
+        st.error(f"Fatal Error creating agent executor: {e}")
+        logger.exception("Fatal Error creating agent executor.")
         return None
 
 # --- Initialize Core Components ---
-# Wrapped in a function for clarity and error checking
+# This block runs once and caches results thanks to @st.cache_resource
+# Order matters: embeddings -> vector stores -> tools -> llm -> prompt -> executor
 def initialize_app():
+    """Initializes all necessary components for the agent."""
+    st.sidebar.header("System Status")
+    status_placeholder = st.sidebar.empty()
+    status_placeholder.info("Initializing system...")
+
     embeddings = load_embeddings()
-    # Build FAISS from PDF now instead of loading
     faiss_db = build_faiss_vector_store_from_pdf(embeddings)
     neo4j_interface = setup_neo4j_vector_interface(embeddings)
     tools = get_tools(faiss_db, neo4j_interface)
     llm = get_llm()
     prompt = get_agent_prompt()
     agent_executor = get_agent_executor(llm, tools, prompt)
+
+    if all([embeddings, faiss_db, neo4j_interface, tools, llm, prompt, agent_executor]):
+        status_placeholder.success("System Initialized and Ready.")
+        logger.info("All components initialized successfully.")
+    else:
+        status_placeholder.error("System Initialization Failed. Check logs.")
+        logger.error("One or more components failed to initialize.")
+
     return agent_executor
 
 # --- Run Initialization ---
-# This part will be cached after the first run
 agent_executor_instance = initialize_app()
 
 # --- Session State for Chat History ---
+# Initialize chat history if it doesn't exist
 if "messages" not in st.session_state:
     st.session_state.messages = []
     logger.info("Chat history initialized in session state.")
 
 # --- Display Existing Chat History ---
+# Iterate through the messages stored in session state and display them
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -288,60 +313,69 @@ for message in st.session_state.messages:
 # --- User Input Area ---
 st.sidebar.header("Agent Input")
 agent_level_options = list(AGENT_LEVEL_MAP.keys())
+# Default to first level if nothing selected (or handle None)
 selected_agent_level_name = st.sidebar.selectbox(
     "Select Agent Level:",
     options=agent_level_options,
+    index=0, # Default selection
     key="agent_level_selector"
 )
-selected_agent_level_num = AGENT_LEVEL_MAP.get(selected_agent_level_name, 1) # Default to Level 1
+selected_agent_level_num = AGENT_LEVEL_MAP.get(selected_agent_level_name, 1)
 
+# Get query input from the user
 query = st.chat_input("Enter your classified query:")
 
-if query and selected_agent_level_name: # Check if query exists
-    # Format user input for display
-    user_input_display = f"*(Level {selected_agent_level_num} - {selected_agent_level_name.split(' - ')[1]})* {query}" # Add descriptive name
+# --- Handle New Query Submission ---
+if query:
+    # Format user input for display, including level information
+    user_input_display = f"*(Level {selected_agent_level_num} - {selected_agent_level_name.split(' - ')[1]})* {query}"
+    # Add user message to session state history
     st.session_state.messages.append({"role": "user", "content": user_input_display})
+    # Display user message in chat interface
     with st.chat_message("user"):
         st.markdown(user_input_display)
 
-    # Prepare history for the agent (list of BaseMessage objects)
+    # Prepare history in the format expected by the agent prompt (list of BaseMessage objects)
     agent_history_messages = []
-    for msg in st.session_state.messages[:-1]: # Exclude current user input
+    # Iterate through history *before* the current message
+    for msg in st.session_state.messages[:-1]:
         if msg["role"] == "user":
              agent_history_messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "assistant":
              agent_history_messages.append(AIMessage(content=msg["content"]))
 
-    # Invoke the agent if successfully initialized
+    # Invoke the agent only if it was successfully initialized
     if agent_executor_instance:
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            message_placeholder.markdown("...") # Thinking indicator
-            with st.spinner("Project SHADOW processing..."):
+            message_placeholder = st.empty() # Create placeholder for streaming/final response
+            message_placeholder.markdown("...") # Indicate thinking
+            with st.spinner("Project SHADOW processing..."): # Show spinner during processing
                 logger.info(f"Invoking agent for Level {selected_agent_level_num} with query: {query}")
                 try:
+                    # Execute the agent
                     response = agent_executor_instance.invoke({
                         'agent_level': selected_agent_level_num, # Pass numeric level
                         'query': query,
                         'chat_history': agent_history_messages
                     })
-                    # Check if output is directly in response or nested
-                    agent_response = response.get('output', response) # Adjust based on actual AgentExecutor output structure
-                    if not isinstance(agent_response, str): # Handle cases where output might be complex
-                         agent_response = str(agent_response)
+                    # Extract the final output string
+                    agent_response = response.get('output', response) # Handle potential variations in output dict
+                    if not isinstance(agent_response, str):
+                         agent_response = str(agent_response) # Ensure it's a string
 
-                    logger.info(f"Agent response received: {agent_response[:100]}...")
-                    message_placeholder.markdown(agent_response)
+                    logger.info(f"Agent response received: {agent_response[:100]}...") # Log snippet
+                    message_placeholder.markdown(agent_response) # Update placeholder with actual response
+                    # Add agent response to the persistent session history
                     st.session_state.messages.append({"role": "assistant", "content": agent_response})
 
                 except Exception as e:
+                    # Handle potential errors during agent execution
                     logger.exception("Agent execution failed.")
-                    error_message = f"Agent Error: Processing failed. Please try again or refine your query. Details: {type(e).__name__}"
+                    error_message = f"Agent Error: Processing failed. Please try again or refine query. (Details: {type(e).__name__})"
                     message_placeholder.error(error_message)
+                    # Add error to history for context if needed
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
     else:
-        st.error("Agent Executor is not initialized. Cannot process query. Check configuration and logs.")
+        # Handle case where agent couldn't be initialized on startup
+        st.error("Agent Executor is not initialized. Cannot process query. Check configuration, secrets, and logs.")
         logger.error("Agent executor instance is None, cannot process query.")
-
-elif query and not selected_agent_level_name:
-     st.warning("Please select an agent level.")
