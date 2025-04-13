@@ -7,6 +7,6 @@ langchain-neo4j # Required for Neo4jVector and Neo4jGraph interactions
 
 faiss-cpu 
 neo4j >=5.16.0,<6.0.0 
-pypdfs
+pypdf
 groq
 openai
