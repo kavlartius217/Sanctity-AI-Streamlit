@@ -1,4 +1,4 @@
-# app.py
+
 import streamlit as st
 import os
 import logging
@@ -13,26 +13,24 @@ from langchain_groq import ChatGroq
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.messages import AIMessage, HumanMessage
 
-# --- Logging Setup ---
-# Configure logging for better debugging if needed during development/deployment
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Page Configuration ---
+
 st.set_page_config(page_title="Project SHADOW", layout="wide", initial_sidebar_state="expanded")
 st.title(" R.A.W. Intelligence Retrieval System (Project SHADOW) ")
 st.caption("Classified Level 7 - For Authorized Personnel Only")
 
-# --- Constants ---
-# Ensure this path points to the PDF file within your deployment environment
-SECRET_MANUAL_PDF = "SECRET INFO MANUAL.pdf" # Assumes it's in the same directory as app.py
 
-# Neo4j configuration details (must match your populated database)
-NEO4J_NODE_LABEL = "Document"                 # Label used in Neo4j for text chunks
-NEO4J_TEXT_PROPERTY = "text"                  # Property name for text in Neo4j nodes
-NEO4J_EMBEDDING_PROPERTY = "embedding"        # Property name for embedding in Neo4j nodes
+SECRET_MANUAL_PDF = "SECRET INFO MANUAL.pdf" 
 
-# Agent level mapping for the dropdown
+
+NEO4J_NODE_LABEL = "Document"                 
+NEO4J_TEXT_PROPERTY = "text"                  
+NEO4J_EMBEDDING_PROPERTY = "embedding"        
+
+
 AGENT_LEVEL_MAP = {
     "Level 1 - Novice Operative (Shadow Footprint)": 1,
     "Level 2 - Tactical Specialist (Iron Claw)": 2,
@@ -41,7 +39,7 @@ AGENT_LEVEL_MAP = {
     "Level 5 - Intelligence Overlord (Silent Whisper)": 5,
 }
 
-# --- Resource Initialization Functions with Caching ---
+
 
 @st.cache_resource
 def load_embeddings():
@@ -53,7 +51,7 @@ def load_embeddings():
             st.error("Google API Key not found in secrets.toml. Cannot load embeddings.")
             logger.error("GOOGLE_API_KEY not found in secrets.")
             return None
-        # Set environment variable if needed by the underlying library
+
         os.environ['GOOGLE_API_KEY'] = google_api_key
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         logger.info("Embeddings model loaded successfully.")
@@ -79,7 +77,7 @@ def build_faiss_vector_store_from_pdf(_embeddings):
         return None
 
     try:
-        # Display progress to the user for potentially slow operations
+     
         with st.spinner(f"Loading and processing {SECRET_MANUAL_PDF}..."):
             loader = PyPDFLoader(SECRET_MANUAL_PDF)
             docs = loader.load()
@@ -112,7 +110,7 @@ def setup_neo4j_vector_interface(_embeddings):
         logger.error("Embeddings model not available for Neo4jVector connection.")
         return None
     try:
-        # Retrieve credentials securely using st.secrets
+      
         uri = st.secrets.get("NEO4J_URI")
         username = st.secrets.get("NEO4J_USERNAME")
         password = st.secrets.get("NEO4J_PASSWORD")
@@ -122,21 +120,20 @@ def setup_neo4j_vector_interface(_embeddings):
             logger.error("Missing Neo4j credentials in secrets.")
             return None
 
-        # Connect to the existing index in the Neo4j database
         neo4j_vector = Neo4jVector.from_existing_graph(
             embedding=_embeddings,
             url=uri,
             username=username,
             password=password,
-            node_label=NEO4J_NODE_LABEL,                 # Must match label in Neo4j
-            text_node_properties=[NEO4J_TEXT_PROPERTY],  # Must match text property in Neo4j
-            embedding_node_property=NEO4J_EMBEDDING_PROPERTY, # Must match embedding property in Neo4j
+            node_label=NEO4J_NODE_LABEL,                 
+            text_node_properties=[NEO4J_TEXT_PROPERTY], 
+            embedding_node_property=NEO4J_EMBEDDING_PROPERTY, 
         )
         logger.info("Neo4jVector interface connected successfully (using secrets).")
         st.success("Response Framework Neo4j Interface Connected.")
         return neo4j_vector
     except Exception as e:
-        # Provide informative error message if connection fails
+    
         st.error(f"Error setting up Neo4jVector interface: {e}")
         logger.exception("Error connecting Neo4jVector interface.")
         st.warning(f"Ensure Neo4j is running and accessible at the URI specified in secrets "
@@ -154,11 +151,11 @@ def get_tools(_secret_manual_retriever_obj, _framework_retriever_obj):
         return []
 
     try:
-        # Create retrievers from the vector store objects
+        
         secret_retriever = _secret_manual_retriever_obj.as_retriever()
         framework_retriever = _framework_retriever_obj.as_retriever()
 
-        # Define the tools with clear names and descriptions
+        
         secret_tool = create_retriever_tool(
             retriever=secret_retriever,
             name="search_raw_agent_secret_manual",
@@ -170,7 +167,7 @@ def get_tools(_secret_manual_retriever_obj, _framework_retriever_obj):
             description="Use this tool FIRST to understand response rules, greetings, styles, access control based on agent level (1-5) and query. Contains rules (1-100) for handling specific queries/keywords ('Omega Echo', 'disguise strategies', 'Level-5 data'). Use for 'How should I respond?', 'Greeting for?', 'Rule for?', 'Response style for?', agent classifications."
         )
         logger.info("Agent tools created successfully.")
-        # IMPORTANT: Ensure framework tool is first in the list
+      
         return [framework_tool, secret_tool]
     except Exception as e:
         st.error(f"Error creating retriever tools: {e}")
@@ -187,7 +184,7 @@ def get_llm():
             st.error("Groq API Key not found in secrets.toml. Cannot initialize LLM.")
             logger.error("GROQ_API_KEY not found in secrets.")
             return None
-        # Initialize Groq LLM with specified model and low temperature for consistency
+       
         llm = ChatGroq(model='gemma2-9b-it', temperature=0.2, groq_api_key=groq_api_key)
         logger.info("LLM initialized successfully.")
         return llm
@@ -200,7 +197,7 @@ def get_llm():
 def get_agent_prompt():
     """Creates the detailed ChatPromptTemplate for the agent."""
     logger.info("Creating agent prompt template.")
-    # Final refined prompt with explicit steps and strict handling
+ 
     return ChatPromptTemplate.from_messages([
         (
             "system",
@@ -252,26 +249,24 @@ def get_agent_executor(_llm, _tools, _prompt):
         return None
 
     try:
-        # Using create_openai_tools_agent, ensure LLM supports compatible tool/function calling
+
         agent = create_openai_tools_agent(llm=_llm, tools=_tools, prompt=_prompt)
         agent_executor = AgentExecutor(
             agent=agent,
             tools=_tools,
-            verbose=True, # Logs agent steps to console/logs (useful for debugging)
-            handle_parsing_errors=True, # Provides robustness if LLM output isn't perfectly formatted
-            max_iterations=10 # Limit iterations to prevent runaway agents
+            verbose=True, 
+            handle_parsing_errors=True, 
+            max_iterations=10
             )
         logger.info("Agent executor created successfully.")
-        st.success("Agent Executor Initialized and Ready.") # User feedback
+        st.success("Agent Executor Initialized and Ready.")
         return agent_executor
     except Exception as e:
         st.error(f"Fatal Error creating agent executor: {e}")
         logger.exception("Fatal Error creating agent executor.")
         return None
 
-# --- Initialize Core Components ---
-# This block runs once and caches results thanks to @st.cache_resource
-# Order matters: embeddings -> vector stores -> tools -> llm -> prompt -> executor
+
 def initialize_app():
     """Initializes all necessary components for the agent."""
     st.sidebar.header("System Status")
@@ -295,87 +290,72 @@ def initialize_app():
 
     return agent_executor
 
-# --- Run Initialization ---
+
 agent_executor_instance = initialize_app()
 
-# --- Session State for Chat History ---
-# Initialize chat history if it doesn't exist
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
     logger.info("Chat history initialized in session state.")
 
-# --- Display Existing Chat History ---
-# Iterate through the messages stored in session state and display them
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- User Input Area ---
+
 st.sidebar.header("Agent Input")
 agent_level_options = list(AGENT_LEVEL_MAP.keys())
-# Default to first level if nothing selected (or handle None)
+
 selected_agent_level_name = st.sidebar.selectbox(
     "Select Agent Level:",
     options=agent_level_options,
-    index=0, # Default selection
+    index=0,
     key="agent_level_selector"
 )
 selected_agent_level_num = AGENT_LEVEL_MAP.get(selected_agent_level_name, 1)
 
-# Get query input from the user
+
 query = st.chat_input("Enter your classified query:")
 
-# --- Handle New Query Submission ---
 if query:
-    # Format user input for display, including level information
-    user_input_display = f"*(Level {selected_agent_level_num} - {selected_agent_level_name.split(' - ')[1]})* {query}"
-    # Add user message to session state history
-    st.session_state.messages.append({"role": "user", "content": user_input_display})
-    # Display user message in chat interface
-    with st.chat_message("user"):
-        st.markdown(user_input_display)
 
-    # Prepare history in the format expected by the agent prompt (list of BaseMessage objects)
+    user_input_display = f"*(Level {selected_agent_level_num} - {selected_agent_level_name.split(' - ')[1]})* {query}"
+    st.session_state.messages.append({"role": "user", "content": user_input_display})
+    with st.chat_message("user"):
+        st.markdown(user_input_display) 
     agent_history_messages = []
-    # Iterate through history *before* the current message
     for msg in st.session_state.messages[:-1]:
         if msg["role"] == "user":
              agent_history_messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "assistant":
              agent_history_messages.append(AIMessage(content=msg["content"]))
 
-    # Invoke the agent only if it was successfully initialized
     if agent_executor_instance:
         with st.chat_message("assistant"):
-            message_placeholder = st.empty() # Create placeholder for streaming/final response
-            message_placeholder.markdown("...") # Indicate thinking
-            with st.spinner("Project SHADOW processing..."): # Show spinner during processing
+            message_placeholder = st.empty()
+            message_placeholder.markdown("...") 
+            with st.spinner("Project SHADOW processing..."):
                 logger.info(f"Invoking agent for Level {selected_agent_level_num} with query: {query}")
                 try:
-                    # Execute the agent
                     response = agent_executor_instance.invoke({
-                        'agent_level': selected_agent_level_num, # Pass numeric level
+                        'agent_level': selected_agent_level_num, 
                         'query': query,
                         'chat_history': agent_history_messages
                     })
-                    # Extract the final output string
-                    agent_response = response.get('output', response) # Handle potential variations in output dict
+        
+                    agent_response = response.get('output', response) 
                     if not isinstance(agent_response, str):
-                         agent_response = str(agent_response) # Ensure it's a string
+                         agent_response = str(agent_response)
 
-                    logger.info(f"Agent response received: {agent_response[:100]}...") # Log snippet
-                    message_placeholder.markdown(agent_response) # Update placeholder with actual response
-                    # Add agent response to the persistent session history
+                    logger.info(f"Agent response received: {agent_response[:100]}...")
+                    message_placeholder.markdown(agent_response) 
                     st.session_state.messages.append({"role": "assistant", "content": agent_response})
 
-                except Exception as e:
-                    # Handle potential errors during agent execution
+                except Exception as e:    
                     logger.exception("Agent execution failed.")
                     error_message = f"Agent Error: Processing failed. Please try again or refine query. (Details: {type(e).__name__})"
                     message_placeholder.error(error_message)
-                    # Add error to history for context if needed
                     st.session_state.messages.append({"role": "assistant", "content": error_message})
     else:
-        # Handle case where agent couldn't be initialized on startup
         st.error("Agent Executor is not initialized. Cannot process query. Check configuration, secrets, and logs.")
         logger.error("Agent executor instance is None, cannot process query.")
