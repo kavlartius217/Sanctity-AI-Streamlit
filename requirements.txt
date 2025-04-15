@@ -6,7 +6,7 @@ langchain-openai # Required for create_openai_tools_agent
 langchain-neo4j # Required for Neo4jVector and Neo4jGraph interactions
 
 faiss-cpu 
-neo4j >=5.16.0,<6.0.0 
+neo4j>=5.16.0,<6.0.0
 pypdf
 groq
 openai
